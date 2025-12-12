@@ -36,40 +36,33 @@ class MusicAppUI(ctk.CTk):
         ctk.CTkLabel(self.sidebar, text="Auto-Playlists:", font=("Arial", 14, "bold")).pack(pady=(30, 10))
         ctk.CTkButton(self.sidebar, text="🔥 TOP 10 Best", fg_color="#D4AF37", text_color="black",
                       command=lambda: self.show_playlist("best")).pack(pady=5, padx=20, fill="x")
-        ctk.CTkButton(self.sidebar, text="💩 TOP 10 Worst", fg_color="#555",
+        ctk.CTkButton(self.sidebar, text="TOP 10 Worst", fg_color="#555",
                       command=lambda: self.show_playlist("worst")).pack(pady=5, padx=20, fill="x")
 
-        ctk.CTkLabel(self.sidebar, text="View Mode:").pack(side="bottom", pady=5)
-        self.seg_view = ctk.CTkSegmentedButton(self.sidebar, values=["List", "Grid"], command=self.change_view)
-        self.seg_view.set("List")
-        self.seg_view.pack(side="bottom", padx=10, pady=20)
+        # [FIX] Видалено перемикач View Mode
 
         # 2. ПРАВА ПАНЕЛЬ (Main Content)
         self.right = ctk.CTkFrame(self, fg_color="transparent")
         self.right.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         
         self.right.grid_columnconfigure(0, weight=1)
-        # ВАЖЛИВО: Тепер контент знаходиться в рядку 1 (раніше був 2), тому розтягуємо рядок 1
         self.right.grid_rowconfigure(1, weight=1)
 
-        # 2.1 Sort Header (Тепер Row 0, бо пошук видалено)
+        # 2.1 Sort Header
         self.sort_frame = ctk.CTkFrame(self.right, height=30, fg_color="#222")
         self.sort_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         self.setup_sort_buttons()
 
-        # 2.2 Content (Тепер Row 1)
+        # 2.2 Content
         self.content = ContentFrame(self.right, self.logic, on_play_callback=self.play_track)
         self.content.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
 
-        # 2.3 Player (Тепер Row 2 - фіксований знизу)
+        # 2.3 Player
         self.player = PlayerFrame(self.right, self.logic, on_rate_callback=self.refresh_current, on_delete_callback=None)
         self.player.grid(row=2, column=0, sticky="ew")
 
         self.refresh_all()
 
-    # ... решта методів (add_folder, setup_sort_buttons і т.д.) залишаються без змін ...
-    # ТІЛЬКИ видали методи perform_search та clear_search, бо кнопок більше немає.
-    
     def setup_sort_buttons(self):
         for w in self.sort_frame.winfo_children(): w.destroy()
         cols = [("Artist", "artist"), ("Title", "title"), ("Time", "duration"), ("Album", "album"), ("Rating", "rating")]
@@ -100,16 +93,10 @@ class MusicAppUI(ctk.CTk):
         self.content.refresh()
 
     def show_playlist(self, mode):
-        # Ховаємо панель сортування, бо це спец-плейлист
         self.sort_frame.grid_remove()
-        # 1. Беремо ТІЛЬКИ треки (параметр "tracks")
-        # C++ вже має LIMIT 10 у SQL запиті, тому повернеться рівно 10 пісень
         tracks = self.logic.get_advanced_top("tracks", mode)
-        # 2. Формуємо заголовок
-        header = "🔥 TOP 10 BEST TRACKS" if mode == "best" else "💩 TOP 10 WORST TRACKS"
-        # 3. Малюємо тільки ці треки
+        header = "🔥 TOP 10 BEST TRACKS" if mode == "best" else "TOP 10 WORST TRACKS"
         self.content.draw_top_chart(tracks, header)
 
-    def change_view(self, val): self.content.set_view_mode("list" if val == "List" else "grid")
     def refresh_current(self): self.content.refresh()
     def play_track(self, playlist, index): self.player.load_playlist(playlist, index)

@@ -8,7 +8,7 @@ class RatingWindow(ctk.CTkToplevel):
         self.on_close_callback = on_close_callback
         
         self.title("Rate Track")
-        self.geometry("450x650") # Трохи ширше, щоб влізли цифри
+        self.geometry("450x650") 
         self.attributes("-topmost", True)
         
         if not current_data:
@@ -17,7 +17,7 @@ class RatingWindow(ctk.CTkToplevel):
         self.sliders = {}
         self.checks = {}
         self.check_vars = {}
-        self.value_labels = {} # Сюди будемо зберігати лейбли з цифрами
+        self.value_labels = {} 
 
         ctk.CTkLabel(self, text="Rate this Track", font=("Arial", 22, "bold")).pack(pady=20)
         
@@ -91,7 +91,6 @@ class RatingWindow(ctk.CTkToplevel):
                            command=lambda v, k=key: self.update_label(k, v))
         sl.set(val)
         
-        # Блокуємо, якщо чекбокс вимкнено
         if not is_active:
             sl.configure(state="disabled")
             val_lbl.configure(text_color="gray")
@@ -100,7 +99,6 @@ class RatingWindow(ctk.CTkToplevel):
         self.sliders[key] = sl
 
     def update_label(self, key, value):
-        # Ця функція викликається при русі слайдера
         int_val = int(value)
         self.value_labels[key].configure(text=str(int_val))
 

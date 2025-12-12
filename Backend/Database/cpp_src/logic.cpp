@@ -11,7 +11,7 @@
 #define EXPORT __declspec(dllexport)
 
 // ==========================================
-// СТРУКТУРИ ДАНИХ (Data Structures)
+// СТРУКТУРИ ДАНИХ
 // ==========================================
 struct TrackData {
     int id;
@@ -39,11 +39,11 @@ struct TopItemData {
     char secondary[256];
     double rating;
     char cover_path[256];
-    int type; // 0=Track, 1=Album, 2=Artist
+    int type; 
 };
 
 // ==========================================
-// 1. АБСТРАКЦІЯ (Аудіо Інтерфейс)
+// АУДІО ПЛЕЄР (MCI)
 // ==========================================
 class IAudioPlayer {
 public:
@@ -55,19 +55,12 @@ public:
     virtual ~IAudioPlayer() {}
 };
 
-// ==========================================
-// 2. РЕАЛІЗАЦІЯ (Windows MCI)
-// ==========================================
 class WindowsAudioPlayer : public IAudioPlayer {
 public:
     void play(const char* path) override {
-        // Закриваємо попередній файл перед відкриттям нового
         mciSendStringA("close mp3", NULL, 0, NULL);
-        
         std::string cmd = "open \"" + std::string(path) + "\" type mpegvideo alias mp3";
         mciSendStringA(cmd.c_str(), NULL, 0, NULL);
-        
-        // ВАЖЛИВО: Задаємо формат часу в мілісекундах, щоб уникнути багів з позицією
         mciSendStringA("set mp3 time format milliseconds", NULL, 0, NULL);
         mciSendStringA("play mp3", NULL, 0, NULL);
     }
@@ -91,29 +84,23 @@ public:
 
     double getPosition() override {
         char buf[128];
-        // Гарантуємо формат перед зчитуванням
         mciSendStringA("set mp3 time format milliseconds", NULL, 0, NULL);
         mciSendStringA("status mp3 position", buf, 128, NULL);
-        return atof(buf) / 1000.0; // Повертаємо секунди
+        return atof(buf) / 1000.0;
     }
 
     void setPosition(const char* path, double seconds) override {
-        // Гарантуємо формат часу
         mciSendStringA("set mp3 time format milliseconds", NULL, 0, NULL);
-        
         char cmd[256];
         long ms = (long)(seconds * 1000);
-        
-        // Використовуємо SEEK, а потім PLAY - це найнадійніший метод
         sprintf(cmd, "seek mp3 to %ld", ms);
         mciSendStringA(cmd, NULL, 0, NULL);
-        
         mciSendStringA("play mp3", NULL, 0, NULL);
     }
 };
 
 // ==========================================
-// 3. ІНКАПСУЛЯЦІЯ (Менеджер бібліотеки)
+// МЕНЕДЖЕР БІБЛІОТЕКИ
 // ==========================================
 class LibraryManager {
 private:
@@ -125,7 +112,7 @@ private:
     bool is_shuffle;
     bool is_repeat;
     
-    IAudioPlayer* player; // Поліморфний вказівник
+    IAudioPlayer* player;
 
 public:
     LibraryManager() : db(nullptr), cursor_stmt(nullptr), group_stmt(nullptr), top_stmt(nullptr), is_shuffle(false), is_repeat(false) {
@@ -138,10 +125,8 @@ public:
         delete player;
     }
 
-    // --- Робота з Базою Даних ---
     void initDB() {
         if (sqlite3_open("music_library.db", &db)) return;
-        
         const char* sql = 
             "CREATE TABLE IF NOT EXISTS tracks ("
             "id INTEGER PRIMARY KEY, path TEXT UNIQUE, title TEXT, artist TEXT, "
@@ -149,7 +134,6 @@ public:
             "rate_melody INTEGER DEFAULT 0, rate_rhythm INTEGER DEFAULT 0, "
             "rate_vocals INTEGER DEFAULT 0, rate_lyrics INTEGER DEFAULT 0, "
             "rate_arrange INTEGER DEFAULT 0, has_vocals INTEGER DEFAULT 1, has_lyrics INTEGER DEFAULT 1)";
-        
         char* errMsg;
         sqlite3_exec(db, sql, 0, 0, &errMsg);
         srand(time(0));
@@ -180,20 +164,17 @@ public:
         return false;
     }
 
-    // --- Запити (Сортування, Фільтрація, Пошук) ---
+    // --- Basic Query ---
     void prepareQuery(char* sort_col, char* order, char* filter_col, char* filter_val) {
         if (!db) return;
         if (cursor_stmt) sqlite3_finalize(cursor_stmt);
         
         std::string sql = "SELECT * FROM tracks";
-        
-        // Фільтрація (Artist/Album)
         if (filter_col != NULL && strlen(filter_col) > 0) {
             sql += " WHERE ";
             sql += filter_col;
             sql += " = ?";
         }
-        
         sql += " ORDER BY ";
         sql += sort_col;
         sql += " ";
@@ -209,9 +190,7 @@ public:
     void prepareSearch(const char* query) {
         if (!db) return;
         if (cursor_stmt) sqlite3_finalize(cursor_stmt);
-        
         std::string sql = "SELECT * FROM tracks WHERE title LIKE ? OR artist LIKE ?";
-        
         if (sqlite3_prepare_v2(db, sql.c_str(), -1, &cursor_stmt, 0) == SQLITE_OK) {
             std::string q_str = "%" + std::string(query) + "%";
             sqlite3_bind_text(cursor_stmt, 1, q_str.c_str(), -1, SQLITE_TRANSIENT);
@@ -243,13 +222,13 @@ public:
         return false;
     }
 
-    // --- Advanced Tops (Треки, Альбоми, Артисти) ---
+    // --- Top Charts ---
     void prepareAdvancedTop(int entity_type, int order_mode) {
         if (!db) return;
         if (top_stmt) sqlite3_finalize(top_stmt);
         
         std::string sql;
-        std::string order = (order_mode == 1) ? "DESC" : "ASC"; // 1=Best
+        std::string order = (order_mode == 1) ? "DESC" : "ASC";
         
         if (entity_type == 0) { // TRACKS
             sql = "SELECT title, artist, rating, path, 0 FROM tracks WHERE rating > 0 ORDER BY rating " + order + " LIMIT 10";
@@ -274,39 +253,42 @@ public:
         return false;
     }
 
-    // --- Групування (Browser) ---
+    // --- Grouping & Navigation (NEW) ---
     void prepareGroupQuery(int mode) {
         if (!db) return;
         if (group_stmt) sqlite3_finalize(group_stmt);
-        
         std::string sql;
         if (mode == 1) sql = "SELECT artist, '', COUNT(*), MIN(path) FROM tracks GROUP BY artist ORDER BY artist";
         else sql = "SELECT album, artist, COUNT(*), MIN(path) FROM tracks GROUP BY album ORDER BY album";
-        
         sqlite3_prepare_v2(db, sql.c_str(), -1, &group_stmt, 0);
     }
 
-    // Заміни стару функцію fetchGroupItem на цю:
+    void prepareAlbumsByArtist(const char* artist_name) {
+        if (!db) return;
+        if (group_stmt) sqlite3_finalize(group_stmt);
+        std::string sql = "SELECT album, artist, COUNT(*), MIN(path) FROM tracks WHERE artist = ? GROUP BY album ORDER BY album";
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &group_stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(group_stmt, 1, artist_name, -1, SQLITE_TRANSIENT);
+        }
+    }
+
     bool fetchGroupItem(GroupData* g) {
         if (!group_stmt) return false;
         if (sqlite3_step(group_stmt) == SQLITE_ROW) {
-            // Безпечне зчитування (перевірка на NULL)
             const char* val_name = (const char*)sqlite3_column_text(group_stmt, 0);
             const char* val_sec = (const char*)sqlite3_column_text(group_stmt, 1);
             const char* val_path = (const char*)sqlite3_column_text(group_stmt, 3);
 
-            // Якщо поле пусте, записуємо "Unknown" або пустий рядок
             strcpy(g->name, val_name ? val_name : "Unknown");
             strcpy(g->secondary, val_sec ? val_sec : "");
             g->count = sqlite3_column_int(group_stmt, 2);
             strcpy(g->cover_path, val_path ? val_path : "");
-            
             return true;
         }
         return false;
     }
 
-    // --- Рейтинг ---
+    // --- Rating Update ---
     bool updateRating(char* path, double avg, int mel, int rhy, int voc, int lyr, int arr, int h_voc, int h_lyr) {
         if (!db) return false;
         sqlite3_stmt* st;
@@ -324,14 +306,14 @@ public:
         return false;
     }
 
-    // --- Управління плеєром ---
+    // --- Audio Wrappers ---
     void audioPlay(const char* path) { player->play(path); }
     void audioPause() { player->pause(); }
     bool audioIsPlaying() { return player->isPlaying(); }
     double audioGetPos() { return player->getPosition(); }
     void audioSetPos(const char* path, double s) { player->setPosition(path, s); }
 
-    // --- Логіка відтворення ---
+    // --- Logic ---
     void toggleShuffle() { is_shuffle = !is_shuffle; if(is_shuffle) srand(time(0)); }
     void toggleRepeat() { is_repeat = !is_repeat; }
     bool getShuffle() { return is_shuffle; }
@@ -343,7 +325,6 @@ public:
         if (current + 1 >= total) return is_repeat ? 0 : -1;
         return current + 1;
     }
-    
     int getPrevIndex(int current, int total) {
         if (total <= 0) return -1;
         if (current - 1 < 0) return is_repeat ? total - 1 : 0;
@@ -351,25 +332,23 @@ public:
     }
 };
 
-// Глобальний менеджер (Singleton в контексті DLL)
 LibraryManager* manager = nullptr;
 
-// ==========================================
-// C-INTERFACE (BRIDGE TO PYTHON)
-// ==========================================
 extern "C" {
     EXPORT void init_system() { if (!manager) manager = new LibraryManager(); }
     EXPORT void logic_clear_database() { if (manager) manager->clearDatabase(); }
     EXPORT bool logic_add_track(TrackData* t) { return manager ? manager->addTrack(t) : false; }
     
     EXPORT void logic_prepare_query(char* s, char* o, char* fc, char* fv) { if (manager) manager->prepareQuery(s, o, fc, fv); }
-    EXPORT void logic_search_tracks(char* q) { if (manager) manager->prepareSearch(q); } // Пошук
+    EXPORT void logic_search_tracks(char* q) { if (manager) manager->prepareSearch(q); }
     EXPORT bool logic_fetch_next(TrackData* t) { return manager ? manager->fetchNextTrack(t) : false; }
     
     EXPORT void logic_prepare_advanced_top(int e, int m) { if (manager) manager->prepareAdvancedTop(e, m); }
     EXPORT bool logic_fetch_top_item(TopItemData* i) { return manager ? manager->fetchTopItem(i) : false; }
     
     EXPORT void logic_prepare_group_query(int m) { if (manager) manager->prepareGroupQuery(m); }
+    // НОВА ФУНКЦІЯ
+    EXPORT void logic_prepare_albums_by_artist(char* artist) { if (manager) manager->prepareAlbumsByArtist(artist); }
     EXPORT bool logic_fetch_next_group(GroupData* g) { return manager ? manager->fetchGroupItem(g) : false; }
     
     EXPORT bool logic_update_rating(char* p, double a, int m, int r, int v, int l, int ar, int hv, int hl) { return manager ? manager->updateRating(p, a, m, r, v, l, ar, hv, hl) : false; }
@@ -380,10 +359,8 @@ extern "C" {
     EXPORT double audio_get_pos() { return manager ? manager->audioGetPos() : 0.0; }
     EXPORT void audio_set_pos(char* path, double s) { if(manager) manager->audioSetPos(path, s); }
     
-    // Повертають bool для правильної зміни кольору кнопок
     EXPORT bool logic_toggle_shuffle() { if(manager) { manager->toggleShuffle(); return manager->getShuffle(); } return false; }
     EXPORT bool logic_toggle_repeat() { if(manager) { manager->toggleRepeat(); return manager->getRepeat(); } return false; }
-    
     EXPORT bool logic_get_shuffle_state() { return manager ? manager->getShuffle() : false; }
     EXPORT bool logic_get_repeat_state() { return manager ? manager->getRepeat() : false; }
     EXPORT int logic_get_next_index(int c, int t) { return manager ? manager->getNextIndex(c, t) : -1; }

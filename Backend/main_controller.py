@@ -4,11 +4,15 @@ import os
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC
 
-# ... (Структури TrackData, GroupData, TopItemData ТІ САМІ) ...
 class TrackData(Structure):
-    _fields_ = [("id", c_int), ("path", c_char * 256), ("title", c_char * 256), ("artist", c_char * 256), ("album", c_char * 256), ("genre", c_char * 100), ("duration", c_double), ("rating", c_double), ("rate_melody", c_int), ("rate_rhythm", c_int), ("rate_vocals", c_int), ("rate_lyrics", c_int), ("rate_arrange", c_int), ("has_vocals", c_int), ("has_lyrics", c_int)]
+    _fields_ = [("id", c_int), ("path", c_char * 256), ("title", c_char * 256), ("artist", c_char * 256), 
+                ("album", c_char * 256), ("genre", c_char * 100), ("duration", c_double), ("rating", c_double), 
+                ("rate_melody", c_int), ("rate_rhythm", c_int), ("rate_vocals", c_int), 
+                ("rate_lyrics", c_int), ("rate_arrange", c_int), ("has_vocals", c_int), ("has_lyrics", c_int)]
+
 class GroupData(Structure):
     _fields_ = [("name", c_char * 256), ("secondary", c_char * 256), ("count", c_int), ("cover_path", c_char * 256)]
+
 class TopItemData(Structure):
     _fields_ = [("name", c_char * 256), ("secondary", c_char * 256), ("rating", c_double), ("cover_path", c_char * 256), ("type", c_int)]
 
@@ -18,7 +22,6 @@ class MainController:
         self.dll_path = os.path.join(self.base_path, "Backend", "Database", "cpp_src", "backend.dll")
         self.lib = None
         
-        # === ЗМІННІ ДЛЯ СОРТУВАННЯ ===
         self.current_sort_col = "artist"
         self.current_sort_order = "ASC"
         
@@ -30,51 +33,63 @@ class MainController:
             self.lib = CDLL(self.dll_path)
             self.lib.init_system()
             
-            # --- ЛОГІКА БАЗИ ДАНИХ ---
+            # --- DATABASE ---
             self.lib.logic_add_track.argtypes = [POINTER(TrackData)]; self.lib.logic_add_track.restype = c_bool
             self.lib.logic_fetch_next.argtypes = [POINTER(TrackData)]; self.lib.logic_fetch_next.restype = c_bool
             self.lib.logic_prepare_query.argtypes = [c_char_p, c_char_p, c_char_p, c_char_p]
             
-            # --- АУДІО (ЦЕ КРИТИЧНО ДЛЯ СЛАЙДЕРА!) ---
-            # 1. audio_get_pos повертає double, треба це вказати явно:
+            # --- AUDIO ---
             if hasattr(self.lib, 'audio_get_pos'):
                 self.lib.audio_get_pos.argtypes = []
-                self.lib.audio_get_pos.restype = c_double  # <--- ОСЬ ЦЬОГО НЕ ВИСТАЧАЛО
-
-            # 2. audio_is_playing повертає bool:
+                self.lib.audio_get_pos.restype = c_double
             if hasattr(self.lib, 'audio_is_playing'):
                 self.lib.audio_is_playing.argtypes = []
                 self.lib.audio_is_playing.restype = c_bool
-
-            # 3. audio_set_pos приймає шлях і double:
             if hasattr(self.lib, 'audio_set_pos'):
                 self.lib.audio_set_pos.argtypes = [c_char_p, c_double]
                 self.lib.audio_set_pos.restype = None
+            
 
-            # --- Інші налаштування (рейтинг, пошук і т.д.) ---
+            # --- RATING & TOPS ---
             self.lib.logic_update_rating.argtypes = [c_char_p, c_double, c_int, c_int, c_int, c_int, c_int, c_int, c_int]
             self.lib.logic_update_rating.restype = c_bool
-
+            
             if hasattr(self.lib, 'logic_prepare_advanced_top'): 
                 self.lib.logic_prepare_advanced_top.argtypes = [c_int, c_int]
                 self.lib.logic_fetch_top_item.argtypes = [POINTER(TopItemData)]
                 self.lib.logic_fetch_top_item.restype = c_bool
 
+            # --- GROUPS & NAVIGATION ---
             if hasattr(self.lib, 'logic_prepare_group_query'):
                 self.lib.logic_prepare_group_query.argtypes = [c_int]
                 self.lib.logic_fetch_next_group.argtypes = [POINTER(GroupData)]
                 self.lib.logic_fetch_next_group.restype = c_bool
-                
+            
+            if hasattr(self.lib, 'logic_prepare_albums_by_artist'):
+                 self.lib.logic_prepare_albums_by_artist.argtypes = [c_char_p]
+                 self.lib.logic_prepare_albums_by_artist.restype = None
+
             if hasattr(self.lib, 'logic_search_tracks'):
                  self.lib.logic_search_tracks.argtypes = [c_char_p]
+            
+            if hasattr(self.lib, 'logic_toggle_shuffle'): self.lib.logic_toggle_shuffle.restype = c_bool
+            if hasattr(self.lib, 'logic_toggle_repeat'): self.lib.logic_toggle_repeat.restype = c_bool
 
-            if hasattr(self.lib, 'logic_toggle_shuffle'):
-                self.lib.logic_toggle_shuffle.restype = c_bool
-            if hasattr(self.lib, 'logic_toggle_repeat'):
-                self.lib.logic_toggle_repeat.restype = c_bool
+            if hasattr(self.lib, 'logic_prepare_albums_by_artist'):
+                 self.lib.logic_prepare_albums_by_artist.argtypes = [c_char_p]
+                 self.lib.logic_prepare_albums_by_artist.restype = None
 
-            print("✅ C++ Backend loaded correctly.")
+            print("C++ Backend loaded correctly.")
         except Exception as e: print(f"❌ Error loading DLL: {e}")
+
+    def get_artist_albums(self, artist_name):
+        if not self.lib: return []
+        self.lib.logic_prepare_albums_by_artist(artist_name.encode('utf-8')) 
+        res = []
+        g = GroupData()
+        while self.lib.logic_fetch_next_group(byref(g)):
+            res.append((g.name.decode('mbcs', 'ignore'), g.secondary.decode('mbcs', 'ignore'), g.count, g.cover_path.decode('mbcs', 'ignore')))
+        return res
 
     # === DATABASE ===
     def clear_database(self):
@@ -98,17 +113,14 @@ class MainController:
             return self.lib.logic_add_track(byref(t))
         except: return False
 
-    # === FETCH WITH SORT TOGGLE ===
+    # === FETCHING ===
     def get_playlist(self, sort_by=None):
-        # Якщо передали новий стовпець - сортуємо ASC
-        # Якщо той самий - міняємо порядок (ASC <-> DESC)
         if sort_by:
             if sort_by == self.current_sort_col:
                 self.current_sort_order = "DESC" if self.current_sort_order == "ASC" else "ASC"
             else:
                 self.current_sort_col = sort_by
-                self.current_sort_order = "ASC" # Новий стовпець завжди починаємо з ASC
-        
+                self.current_sort_order = "ASC"
         return self._fetch_tracks(self.current_sort_col, self.current_sort_order, None, None)
 
     def get_tracks_filtered(self, f_type, f_val): return self._fetch_tracks("title", "ASC", f_type, f_val)
@@ -128,7 +140,9 @@ class MainController:
         res = []
         t = TrackData()
         while self.lib.logic_fetch_next(byref(t)):
-            res.append((t.id, t.path.decode('mbcs', 'ignore'), t.title.decode('mbcs', 'ignore'), t.artist.decode('mbcs', 'ignore'), t.album.decode('mbcs', 'ignore'), t.genre.decode('mbcs', 'ignore'), t.duration, t.rating, t.rate_melody, t.rate_rhythm, t.rate_vocals, t.rate_lyrics, t.rate_arrange, t.has_vocals, t.has_lyrics))
+            res.append((t.id, t.path.decode('mbcs', 'ignore'), t.title.decode('mbcs', 'ignore'), t.artist.decode('mbcs', 'ignore'), 
+                        t.album.decode('mbcs', 'ignore'), t.genre.decode('mbcs', 'ignore'), t.duration, t.rating, 
+                        t.rate_melody, t.rate_rhythm, t.rate_vocals, t.rate_lyrics, t.rate_arrange, t.has_vocals, t.has_lyrics))
         return res
 
     def get_advanced_top(self, entity, mode):
@@ -146,6 +160,16 @@ class MainController:
 
     def get_artists(self): return self._fetch_groups(1)
     def get_albums(self): return self._fetch_groups(2)
+    
+    def get_artist_albums(self, artist_name):
+        if not self.lib: return []
+        self.lib.logic_prepare_albums_by_artist(artist_name.encode('utf-8')) 
+        res = []
+        g = GroupData()
+        while self.lib.logic_fetch_next_group(byref(g)):
+            res.append((g.name.decode('mbcs', 'ignore'), g.secondary.decode('mbcs', 'ignore'), g.count, g.cover_path.decode('mbcs', 'ignore')))
+        return res
+
     def _fetch_groups(self, mode):
         if not self.lib: return []
         self.lib.logic_prepare_group_query(mode)
